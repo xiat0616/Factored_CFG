@@ -1,6 +1,6 @@
 # Factored Classifier-Free Guidance
 
-Official research implementation of **Factored Classifier-Free Guidance (FCFG)**, ICML 2026.
+Official implementation of **Factored Classifier-Free Guidance (FCFG)**, ICML 2026.
 
 **Tian Xia, Fabio De Sousa Ribeiro, Rajat R Rasal, Avinash Kori, Raghav Mehta, and Ben Glocker**
 
@@ -8,11 +8,11 @@ Imperial College London
 
 [Paper](https://proceedings.mlr.press/v306/xia26b.html) · [arXiv](https://arxiv.org/abs/2506.14399) · [Data preparation](docs/DATA.md)
 
-FCFG gives separate guidance strengths to semantic attributes or attribute groups during diffusion sampling. For counterfactual generation, this lets us strengthen an intervention while controlling changes to other attributes. The repository includes the original conditional diffusion implementation, DDIM inversion and counterfactual generation, and FCFG extensions to CFG++ and APG.
+FCFG gives separate guidance strengths to semantic attributes or attribute groups during diffusion sampling. For counterfactual generation, this lets us strengthen an intervention while controlling changes to other attributes. The repository includes conditional diffusion models, DDIM inversion, counterfactual generation, and FCFG extensions to CFG++ and APG.
 
-## Release contents
+## Code overview
 
-This is a focused source release of the research code. The guidance engines, U-Net, conditioning embedder, semantic encoder, and training logic retain the original implementation. Paths and launch scripts have been made portable, and small data-loading and image-I/O fixes are recorded in [PROVENANCE.md](PROVENANCE.md).
+This repository provides training, counterfactual generation, and evaluation code for FCFG on CelebA-HQ, MIMIC-CXR, and EMBED.
 
 | Component | Location |
 | --- | --- |
@@ -27,7 +27,7 @@ This is a focused source release of the research code. The guidance engines, U-N
 | Counterfactual evaluation | `eval_cf.py`, `eval_utils.py` |
 | Experiment recipes | `scripts/` |
 
-**Data and pretrained checkpoints are not included.** Sampling requires a compatible trained checkpoint, and predictor-based evaluation requires a separately trained attribute predictor. Medical dataset preprocessing and private marker annotations are described in the data guide. External counterfactual baseline repositories, notebooks, generated figures, logs, and experiment outputs are omitted.
+**Datasets and pretrained checkpoints are not included.** See the [data preparation guide](docs/DATA.md) for setup instructions. Sampling requires a trained diffusion checkpoint; predictor-based evaluation requires a matching attribute predictor.
 
 ## Installation
 
@@ -43,7 +43,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Run commands from the repository root. The requirements specify compatibility ranges rather than an exact reconstruction of the historical training environment. The bundled smoke test uses CPU and requires no dataset, checkpoint, or downloaded model weights:
+Run commands from the repository root. Check the installation and run the CPU smoke tests with:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -53,6 +53,8 @@ python sample_baselines.py --help
 python -m causal_model.pgm.train_pgm --help
 python eval_cf.py --help
 ```
+
+The smoke tests use synthetic inputs and require no datasets, checkpoints, or downloaded model weights.
 
 ## Data configuration
 
@@ -76,7 +78,7 @@ The loaders construct train, validation, and test datasets together, so all requ
 
 ## Train a diffusion model
 
-The scripts preserve the hyperparameters from the corresponding research launchers and use the active Python environment. They run directly; no scheduler or cluster-specific setup is required.
+Launch training for each dataset with the following scripts. Each script uses the active Python environment and accepts command-line overrides.
 
 ```bash
 bash scripts/train_celeba.sh
@@ -142,7 +144,7 @@ eps_fcfg = eps_uncond
          + w_unintervened * (eps_unintervened - eps_uncond)
 ```
 
-`interv_group` groups the keys passed in `--sample_do_keys` and their complement. For a causal graph requiring descendant updates, compute the counterfactual parent values and appropriate grouping before calling the sampler. The released sampler flips binary attributes, cycles race labels, or resamples age; it does not automatically invoke the parent PGM to propagate interventions.
+`interv_group` groups the keys passed in `--sample_do_keys` and their complement. For a causal graph requiring descendant updates, compute the counterfactual parent values and appropriate grouping before calling the sampler. The sampler flips binary attributes, cycles race labels, or resamples age. Parent-PGM propagation must be applied separately when required by the causal graph.
 
 ### Per-attribute weights and multiple interventions
 
@@ -159,7 +161,7 @@ python sample.py \
 
 An underscore joins attributes for a joint intervention; separate arguments request separate runs. Attribute names containing underscores, such as `Mouth_Slightly_Open`, are matched against checkpoint parent names. In `per_attr` mode, an omitted attribute contributes zero guidance. Factored modes require the attribute-split `CondEmbedder` (`global_cond=False`); a global MLP embedding does not provide meaningful per-attribute chunks.
 
-Other sample types are `rs` for random samples and `rec` for reconstruction. Counterfactual runs also generate reversed counterfactuals. Use a fresh results directory for each new comparison: the research sampler appends metadata when a CSV already exists.
+Other sample types are `rs` for random samples and `rec` for reconstruction. Counterfactual runs also generate reversed counterfactuals. Use a fresh results directory for each new comparison: the sampling scripts append metadata when a CSV already exists.
 
 ### CFG++ and APG
 
@@ -180,7 +182,9 @@ DIFF_ENGINE=apg python sample_baselines.py \
   --timestep_respacing ddim250 --batch_size 20 --num_samples 100
 ```
 
-`DIFF_ENGINE` accepts `cfg`, `cfgpp`, or `apg` and is read when the process starts. The APG examples use zero momentum: the research CLI does not construct temporal momentum buffers, so a nonzero `--apg_momentum` alone does not activate momentum. CFG++ and APG outputs use engine suffixes in their result folder names. The `cfg_choice` argument is retained as a historical result-directory label. The included engines do not branch on it; keep its default `eq1`.
+`DIFF_ENGINE` accepts `cfg`, `cfgpp`, or `apg` and is read when the process starts. CFG++ and APG outputs use engine suffixes in their result folder names. Use the default `--cfg_choice eq1` for result-folder naming; this argument does not select the guidance formula.
+
+The APG examples use zero momentum. Temporal momentum requires buffers passed through the Python API; setting `--apg_momentum` alone does not activate it.
 
 ## Evaluate counterfactuals
 
@@ -193,7 +197,7 @@ bash scripts/train_predictor_celeba.sh
 #                  train_predictor_celeba_four_attributes.sh
 ```
 
-Predictor checkpoints are saved under `pgm_checkpoints/<parents>/<exp_name>/` as `checkpoint.pt` (best validation) and `checkpoint_current.pt` (latest). CelebA and EMBED predictor recipes use `sup_aux`; MIMIC and the four-attribute CelebA recipe use `sup_determ`. The training entry point also retains the original `sup_pgm` setup for fitting parent distributions.
+Predictor checkpoints are saved under `pgm_checkpoints/<parents>/<exp_name>/` as `checkpoint.pt` (best validation) and `checkpoint_current.pt` (latest). CelebA and EMBED predictor recipes use `sup_aux`; MIMIC and the four-attribute CelebA recipe use `sup_determ`. Use `--pgm_setup sup_pgm` to fit parent distributions.
 
 ```bash
 python eval_cf.py \
@@ -207,7 +211,7 @@ python eval_cf.py \
 
 Replace `<diffusion_experiment_name>` with the name stored in the diffusion checkpoint. The predictor must use the same dataset, image size, and ordered parent list as the diffusion experiment. The evaluator reads sampling CSVs and saves `all_cf_eval_results.csv` and comparison plots. Metrics include attribute accuracy/AUROC, F1, amplification measures, pixel MAE, and LPIPS where applicable; omit `--skip_fid` to additionally calculate input-versus-generated FID.
 
-LPIPS and FID may download their evaluation network weights on first use. They are not required by the synthetic tests. Exact paper numbers require the corresponding trained models, original preprocessing, split ordering, evaluation indices, and experiment settings; this source release alone does not supply those artifacts.
+LPIPS and FID may download their evaluation network weights on first use. For comparisons with the paper, use matching trained models, preprocessing, data splits, evaluation indices, and guidance settings.
 
 ## Citation
 
@@ -227,6 +231,6 @@ LPIPS and FID may download their evaluation network weights on first use. They a
 
 ## Acknowledgements and license
 
-This implementation builds on [OpenAI guided-diffusion](https://github.com/openai/guided-diffusion), [causal-gen](https://github.com/biomedia-mira/causal-gen), [ema-pytorch](https://github.com/lucidrains/ema-pytorch), [CLIP](https://github.com/openai/CLIP), and [torchvision](https://github.com/pytorch/vision). Upstream references in the source are retained. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [licenses/](licenses/) for their license notices.
+This implementation builds on [OpenAI guided-diffusion](https://github.com/openai/guided-diffusion), [causal-gen](https://github.com/biomedia-mira/causal-gen), [ema-pytorch](https://github.com/lucidrains/ema-pytorch), [CLIP](https://github.com/openai/CLIP), and [torchvision](https://github.com/pytorch/vision). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [licenses/](licenses/) for their license notices.
 
 Original project contributions use the [MIT license](LICENSE). Dataset and external model terms are separate.
