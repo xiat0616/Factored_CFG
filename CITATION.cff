@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the Factored Classifier-Free Guidance paper."
+type: software
+title: "Factored Classifier-Free Guidance"
+authors:
+  - family-names: Xia
+    given-names: Tian
+  - family-names: De Sousa Ribeiro
+    given-names: Fabio
+  - family-names: Rasal
+    given-names: Rajat R
+  - family-names: Kori
+    given-names: Avinash
+  - family-names: Mehta
+    given-names: Raghav
+  - family-names: Glocker
+    given-names: Ben
+repository-code: "https://github.com/xiat0616/Factored_CFG"
+url: "https://proceedings.mlr.press/v306/xia26b.html"
+license: MIT
